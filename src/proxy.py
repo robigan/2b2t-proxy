@@ -1,6 +1,9 @@
 import logging
-from twisted.internet import reactor
+from twisted.internet import reactor, defer
 from quarry.net.proxy import DownstreamFactory, Bridge, Downstream, Upstream, UpstreamFactory
+from quarry.net.auth import Profile
+from quarry.types.uuid import UUID
+import requests
 
 # based on https://github.com/barneygale/quarry/blob/master/examples/client_chat_logger.py
 # taken from https://github.com/LiveOverflow/minecraft-hacked/blob/main/01_protocol_proxy/teleport_proxy.py
@@ -9,19 +12,11 @@ from quarry.net.proxy import DownstreamFactory, Bridge, Downstream, Upstream, Up
 
 class MyUpstream(Upstream):
     pass
-    # def packet_login_encryption_request(self, buff):
-    #     # buff.save()
 
-    #     buff.restore()
-    #     self.send_packet("login_encryption_request", buff.read())
 
 class MyDownstream(Downstream):
     pass
-    # def packet_login_encryption_response(self, buff):
-    #     # buff.save()
 
-    #     buff.restore()
-    #     self.send_packet("login_encryption_response", buff.read())
 
 
 
@@ -35,9 +30,6 @@ class MyUpstreamFactory(UpstreamFactory):
 
 class MyBridge(Bridge):
     upstream_factory_class = MyUpstreamFactory
-
-    # def __init__(self):
-    #     self.enable_fast_forwarding();
 
     def packet_upstream_chat_message(self, buff):
         buff.save()
@@ -54,6 +46,10 @@ class MyBridge(Bridge):
         elif direction == "upstream":
             self.upstream.send_packet(name, buff.read())
 
+    def make_profile(self):
+        return myProfile
+
+
 
 
 class MyDownstreamFactory(DownstreamFactory):
@@ -67,17 +63,28 @@ class MyDownstreamFactory(DownstreamFactory):
 
 
 # python basic_proxy.py -q 12345
+@defer.inlineCallbacks
 def main(argv):
     # Parse options
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("-a", "--listen-host", default="0.0.0.0", help="address to listen on")
     parser.add_argument("-p", "--listen-port", default=25565, type=int, help="port to listen on")
-    parser.add_argument("-b", "--connect-host", default="127.0.0.1", help="address to connect to")
+    parser.add_argument("-b", "--connect-host", required=True, help="address to connect to")
     parser.add_argument("-q", "--connect-port", default=25565, type=int, help="port to connect to")
+    parser.add_argument("-at", "--access-token", type=str, help="the access token required", required=True)
     args = parser.parse_args(argv)
 
     logging.debug("Arguments parsed")
+
+    logging.info("Trying to create Profile...")
+    response = requests.request("GET", "https://api.minecraftservices.com/minecraft/profile", headers={'Authorization': 'Bearer ' + args.access_token})
+    result = response.json()
+    myUuid = UUID.from_hex(result['id'])
+    myUsername = result['name']
+    global myProfile
+    myProfile = yield Profile.from_token('(skip)', args.access_token, myUsername, myUuid)
+    logging.info(f"My profile made with {myProfile.display_name}")
 
     # Create factory
     factory = MyDownstreamFactory()
